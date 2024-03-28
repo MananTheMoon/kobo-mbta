@@ -3,3 +3,5 @@ config.ini
 tests.py
 *.pyc
 venv/
+.DS_Store
+.gitconfig
