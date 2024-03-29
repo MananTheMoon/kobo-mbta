@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from PIL.ImageFont import FreeTypeFont
 from PIL.Image import Image as PilImage
 from weather import weather_current, weather_forecast, yawkWeather
+from mbta import transit, Prediction
 
 try:
     from _fbink import ffi, lib as fbink
@@ -24,6 +25,10 @@ except ImportError:
     from fbink_mock import ffi, lib as fbink
 
 CONFIGFILE = "config.ini"
+
+white = 255
+black = 0
+gray = 128
 
 
 def wait_for_wifi():
@@ -47,6 +52,9 @@ def get_config_data(file_path):
     data = dict()
     data["api_key"] = parser.get("yawk", "key")
     data["city_id"] = parser.get("yawk", "city")
+    data["stop_1"] = parser.get("yawk", "stop1")
+    data["stop_2"] = parser.get("yawk", "stop2")
+    data["stop_3"] = parser.get("yawk", "stop3")
 
     print("api: {}\ncity: {}".format(data["api_key"], data["city_id"]))
 
@@ -74,6 +82,7 @@ class boxes:
 
 @dataclass
 class fonts:
+    xtiny: FreeTypeFont
     tiny: FreeTypeFont
     small: FreeTypeFont
     comfort: FreeTypeFont
@@ -103,6 +112,11 @@ class YAWK:
         cfg_file_data = get_config_data(CONFIGFILE)
         self.cfg_data["api"] = cfg_file_data["api_key"]
         self.cfg_data["city"] = cfg_file_data["city_id"]
+        self.cfg_data["stops"] = [
+            cfg_file_data["stop_1"],
+            cfg_file_data["stop_2"],
+            cfg_file_data["stop_3"],
+        ]
 
         # fbink configuration
         self.fbink_cfg = ffi.new("FBInkConfig *")
@@ -120,25 +134,37 @@ class YAWK:
         else:
             self.screen_size = (768, 1024)
 
+        # 758 x 1024
+        self.WIDTH = int(self.screen_size[0])
+        self.HEIGHT = int(self.screen_size[1])
+
         # app configuration
         self.ip_address = "1.1.1.1"
 
         # weather class instance
         try:
+            print("Getting weather data...")
             self.weather_fetcher = yawkWeather(self.cfg_data)
             self.weather = data(
                 current=self.weather_fetcher.get_weather_current(),
                 forecast=self.weather_fetcher.get_weather_forecast(),
             )
-            print("\n\nWeather Data", self.weather)
+            print("Successfully fetched weather data.")
         except Exception as e:
-            print(e)
+            print("ERROR: Fetching weather data failed.\n", e)
+            fbink.fbink_close(self.fbfd)
+
+        try:
+            print("Getting transit Data...")
+            self.transit_data = transit(self.cfg_data["stops"]).get_predictions()
+            print("\nTransit Data:\n\n", self.transit_data)
+        except Exception as e:
+            print("ERROR: Fetching weather data failed.\n", e)
             fbink.fbink_close(self.fbfd)
 
         # configuration for the image
         # Boxes positions
         #   current condition
-        # manan
         current = box_descriptor(
             0, 0, int(2 * self.screen_size[0] / 3), int(self.screen_size[1] / 3)
         )
@@ -175,23 +201,7 @@ class YAWK:
             self.screen_size[0],
             int((self.screen_size[1] - current.height) / 3),
         )
-        #   next 3 days
-        next_day0 = box_descriptor(
-            0,
-            current.height + tomorrow.height,
-            int(self.screen_size[0] / 3),
-            self.screen_size[1] - current.height - tomorrow.height,
-        )
-        next_day1 = box_descriptor(
-            next_day0.width, next_day0.pos_y, next_day0.width, next_day0.height
-        )
-        next_day2 = box_descriptor(
-            next_day1.pos_x + next_day1.width,
-            next_day1.pos_y,
-            next_day1.width,
-            next_day1.height,
-        )
-        # self.boxes = boxes(current, today, tomorrow, [next_day0, next_day1, next_day2])
+
         self.boxes = boxes(current, today, mbta_1, mbta_2, mbta_3)
         # fonts
         #   tiny: used on the weather condition for the next days and ip address
@@ -199,6 +209,7 @@ class YAWK:
         #   comfort: temperatures (gets scaled according to the box)
         #   big: for the current temperature
         self.fonts = fonts(
+            xtiny=ImageFont.truetype("fonts/Cabin-Regular.ttf", 18),
             tiny=ImageFont.truetype("fonts/Cabin-Regular.ttf", 22),
             small=ImageFont.truetype("fonts/Fabrica.otf", 26),
             comfort=ImageFont.truetype("fonts/Comfortaa-Regular.ttf", 60),
@@ -215,18 +226,10 @@ class YAWK:
         )
 
     def _create_image(self) -> str:
-        today = self.weather.forecast[0]
         print("Creating image . . .")
+        today = self.weather.forecast[0]
 
-        # 758 x 1024
-        WIDTH = int(self.screen_size[0])
-        HEIGHT = int(self.screen_size[1])
-
-        white = 255
-        black = 0
-        gray = 128
-
-        img = Image.new("L", (WIDTH, HEIGHT), color=white)
+        img = Image.new("L", (self.WIDTH, self.HEIGHT), color=white)
         draw = ImageDraw.Draw(img, "L")
 
         # Dividing lines
@@ -234,7 +237,7 @@ class YAWK:
         draw.line(
             [
                 (self.BORDER, self.boxes.current.height),
-                (WIDTH - self.BORDER, self.boxes.current.height),
+                (self.WIDTH - self.BORDER, self.boxes.current.height),
             ],
             gray,
         )
@@ -250,7 +253,7 @@ class YAWK:
         draw.line(
             [
                 (self.BORDER, self.boxes.mbta_2.pos_y),
-                (WIDTH - self.BORDER, self.boxes.mbta_2.pos_y),
+                (self.WIDTH - self.BORDER, self.boxes.mbta_2.pos_y),
             ],
             gray,
         )
@@ -258,10 +261,19 @@ class YAWK:
         draw.line(
             [
                 (self.BORDER, self.boxes.mbta_3.pos_y),
-                (WIDTH - self.BORDER, self.boxes.mbta_3.pos_y),
+                (self.WIDTH - self.BORDER, self.boxes.mbta_3.pos_y),
             ],
             gray,
         )
+
+        # Draw Transit Stuff
+        transit_boxes: List[box_descriptor] = [
+            self.boxes.mbta_1,
+            self.boxes.mbta_2,
+            self.boxes.mbta_3,
+        ]
+        for i, (key, value) in enumerate(self.transit_data.items()):
+            self._draw_transit_data(img, draw, transit_boxes[i], value)
 
         # Current conditions
         # City Name, Country Code, Day, Time
@@ -398,7 +410,7 @@ class YAWK:
         # ip address
         ip_w, ip_h = draw.textsize(self.ip_address, font=self.fonts.tiny)
         draw.text(
-            (WIDTH - self.BORDER - ip_w, HEIGHT - self.BORDER - ip_h),
+            (self.WIDTH - self.BORDER - ip_w, self.HEIGHT - self.BORDER - ip_h),
             self.ip_address,
             font=self.fonts.tiny,
             fill=gray,
@@ -412,7 +424,7 @@ class YAWK:
                 bat_percent = bat_percent.rstrip("\n")
             bat_w, bat_h = draw.textsize(bat_percent + "%", font=self.fonts.tiny)
             draw.text(
-                (self.BORDER, HEIGHT - self.BORDER - bat_h),
+                (self.BORDER, self.HEIGHT - self.BORDER - bat_h),
                 bat_percent + "%",
                 font=self.fonts.tiny,
                 fill=gray,
@@ -424,6 +436,113 @@ class YAWK:
         else:
             img.save(tempfile.gettempdir() + "\\img.bmp")
             return bytes(tempfile.gettempdir() + "\\img.bmp", "utf-8")
+
+    def _draw_transit_data(
+        self, img: Image.Image, draw: ImageDraw.ImageDraw, box: box_descriptor, data
+    ):
+        spacer = 10
+        box_left = box.pos_x + self.BORDER
+        box_top = box.pos_y + self.BORDER
+        print("Should draw transit data here")
+        cursor_y = box_top
+        cursor_x = box_left + spacer
+
+        title_height = 32
+        footer_height = 64
+
+        # Title Row
+        subway_icon = Image.open(data["icon"]).resize((32, 32))
+        print("MBTA Box 1 (X,Y): ", self.boxes.mbta_1.pos_x, box.pos_y)
+        print("MBTA Box 2 (X,Y): ", self.boxes.mbta_2.pos_x, box.pos_y)
+        img.paste(subway_icon, (cursor_x, cursor_y))
+        cursor_x += subway_icon.width + spacer
+        draw.text(
+            xy=(cursor_x, cursor_y + 5),
+            text=data["name"],
+            font=self.fonts.small,
+            fill=black,
+        )
+        cursor_x = box_left
+        cursor_y += title_height + spacer
+
+        # Prediction Box
+        prediction_width = (self.WIDTH - 2 * self.BORDER) / 6  # 6 predictions per row
+        prediction_height = box.height - 2 * spacer - title_height - footer_height
+        prediction_box = box_descriptor(
+            cursor_x, cursor_y, prediction_width, prediction_height
+        )
+        current_time = datetime.now()
+
+        for destination, predictions in data["predictions"].items():
+            if predictions:
+                predictions_drawn = 0
+                cursor_x_start = cursor_x
+                for prediction in predictions:
+                    self._draw_single_prediction(
+                        img=img,
+                        draw=draw,
+                        box=prediction_box,
+                        prediction=prediction,
+                        current_time=current_time,
+                    )
+                    cursor_x += prediction_box.width
+                    prediction_box.pos_x = prediction_box.pos_x + prediction_box.width
+                    predictions_drawn += 1
+
+                center_of_prediction_set = (cursor_x + cursor_x_start) / 2
+                self._draw_centered_text(
+                    draw=draw,
+                    xy=(
+                        center_of_prediction_set,
+                        cursor_y + prediction_box.height + spacer,
+                    ),
+                    text=destination.split(" ")[0],
+                    font=self.fonts.xtiny,
+                    fill=black,
+                )
+                draw.line(
+                    [
+                        (cursor_x, cursor_y),
+                        (cursor_x, cursor_y + prediction_box.height + footer_height),
+                    ],
+                    gray,
+                )
+
+    def _draw_centered_text(
+        self, draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, font, fill
+    ):
+        x, y = xy
+        size_x, size_y = draw.textsize(text=text, font=font)
+        draw.text(xy=(int(x - size_x / 2), int(y)), text=text, font=font, fill=fill)
+
+    def _draw_single_prediction(
+        self,
+        img: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        box: box_descriptor,
+        prediction: Prediction,
+        current_time,
+    ) -> tuple[int, int]:
+        # Draw a prediction and return the size of the box drawn
+        spacer = 10
+        cursor_y = box.pos_y
+        middle_x = box.pos_x + box.width / 2
+        departure = datetime.strptime(
+            prediction["departureTime"][:-6], "%Y-%m-%dT%H:%M:%S"
+        )
+        time_left = max(((departure - current_time).seconds - 30) / 60, 0)
+        icon = Image.open(prediction["icon"]).resize((32, 32))
+
+        img.paste(icon, (int(middle_x - icon.width / 2), cursor_y))
+        cursor_y += icon.height + spacer
+
+        self._draw_centered_text(
+            draw,
+            (middle_x, cursor_y),
+            text=f"{int(time_left)}m",
+            font=self.fonts.small,
+            fill=black,
+        )
 
     def update(self):
         try:

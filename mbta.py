@@ -4,46 +4,45 @@ from xml.dom.minidom import parseString
 import requests
 from requests.exceptions import RequestException
 import time
-from typing import List, Literal, Dict
-from mbta_static_data import STOPS
+from typing import List, Literal, Dict, TypedDict
+from mbta_static_data import STOPS, ROUTES
 
 StopTypes = Literal["Bus", "Subway", "Rail"]
 
 
-@dataclass
-class StopData:
+class StopData(TypedDict):
     type: StopTypes
     name: str
 
 
-@dataclass
-class Prediction:
-    arrival_time: datetime
-    destination: str
+class Prediction(TypedDict):
+    arrivalTime: datetime
+    departureTime: datetime
+    direction: int
+    route: str
+    icon: str
+    type: str
 
 
 Predictions = Dict[str, List[Prediction]]
 Trips = Dict[str, str]
 
 
-@dataclass
-class TransitStop:
+class TransitStop(TypedDict):
     predictions: Predictions
     type: StopTypes
     name: str
+    icon: str
 
 
 MBTA_API_URL = "https://api-v3.mbta.com"
+FETCH_LIMIT = 50
+DISPLAY_LIMIT = 6
 
 
 class transit:
-    def __init__(self, cfg):
-        self.cfg = cfg
-        self.stops = list(
-            filter(None, [self.cfg["stop1"], self.cfg["stop2"], self.cfg["stop3"]])
-        )
-        print("Stops: ", self.stops)
-
+    def __init__(self, stops: List[str]):
+        self.stops = list(filter(None, stops))
         try:
             res = requests.get(
                 f'{MBTA_API_URL}/stops?filter[id]={",".join(self.stops)}'
@@ -76,15 +75,39 @@ class transit:
     def _transform_trips(self, trips_list: List) -> Trips:
         return {obj["id"]: obj["attributes"]["headsign"] for obj in trips_list}
 
-    def _get_predictions(self, stop: str):
+    def _get_stop_icon(self, stop_data: StopData) -> str:
+        if "icon" in stop_data:
+            return stop_data["icon"]
+        if stop_data["type"] == "Bus":
+            return "icons-transit/Bus.png"
+
+        if stop_data["type"] == "Subway":
+            return "icons-transit/Subway.png"
+        return "icons-transit/Train-Bus.png"
+
+    def _get_route_icon(self, route: str):
+        if route in ROUTES:
+            return ROUTES[route]["icon"]
+        if route.isnumeric():
+            return ROUTES["Bus"]["icon"]
+        return ROUTES["default"]["icon"]
+
+    def _get_route_type(self, route: str):
+        if route in ROUTES:
+            return ROUTES[route]["type"]
+        if route.isnumeric():
+            return ROUTES["Bus"]["type"]
+        return ROUTES["default"]["type"]
+
+    def _get_predictions(self, stop: str) -> TransitStop:
         for attempt in range(5):
             try:
                 print(
                     "URL: ",
-                    f"{MBTA_API_URL}/predictions?filter[stop]={stop}&page[limit]=6&include=trip&sort=arrival_time",
+                    f"{MBTA_API_URL}/predictions?filter[stop]={stop}&page[limit]={FETCH_LIMIT}&include=trip&sort=departure_time",
                 )
                 res = requests.get(
-                    f"{MBTA_API_URL}/predictions?filter[stop]={stop}&page[limit]=6&include=trip&sort=arrival_time"
+                    f"{MBTA_API_URL}/predictions?filter[stop]={stop}&page[limit]={FETCH_LIMIT}&include=trip&sort=departure_time"
                 )
                 data = res.json()["data"]
                 return self._transform_mbta_predictions(
@@ -96,33 +119,45 @@ class transit:
                 print("MBTA Prediction Request for {stop} failed. \r\n{}".format(e))
                 time.sleep(2**attempt)
                 continue
-        print("I'm Here??")
+        return {}
 
     def _transform_mbta_predictions(
         self, data: List, trips: Trips, stop_data: StopData
     ) -> Predictions:
-        output = {
-            "name": stop_data["name"],
-            "type": stop_data["type"],
-        }
-        predictions = {value: [] for key, value in trips.items()}
-        for obj in data:
+        predictions: Predictions = {value: [] for key, value in trips.items()}
+        filtered_data = [
+            obj for obj in data if obj["attributes"]["departure_time"] != None
+        ][0:DISPLAY_LIMIT]
+        for obj in filtered_data:
             trip_headsign = trips[obj["relationships"]["trip"]["data"]["id"]]
+            route = obj["relationships"]["route"]["data"]["id"]
             predictions[trip_headsign].append(
                 {
                     "arrivalTime": obj["attributes"]["arrival_time"],
+                    "departureTime": obj["attributes"]["departure_time"],
                     "direction": obj["attributes"]["direction_id"],
+                    "route": route,
+                    "icon": self._get_route_icon(route),
+                    "type": self._get_route_type(route),
                 }
             )
 
         return {
             "name": stop_data["name"],
             "type": stop_data["type"],
+            "icon": self._get_stop_icon(stop_data),
             "predictions": predictions,
         }
 
+    def get_predictions(self):
+        output = {}
+        for stop in self.stops:
+            stop_name = STOPS[stop]["name"] if stop in STOPS else stop
+            output[stop_name] = self._get_predictions(stop)
+        return output
 
-test_cfg = {"stop1": "2736", "stop2": "2737", "stop3": "place-balsq"}
+
+test_cfg = ["2736", "place-davis", "place-balsq"]
 if __name__ == "__main__":
     print("Main func")
     x = transit({"stop1": "2736", "stop2": "2737", "stop3": "place-balsq"})
