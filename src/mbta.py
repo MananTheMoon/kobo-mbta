@@ -1,11 +1,9 @@
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from xml.dom.minidom import parseString
+from datetime import datetime
 import requests
 from requests.exceptions import RequestException
 import time
 from typing import List, Literal, Dict, TypedDict
-from mbta_static_data import STOPS, ROUTES
+from .mbta_static_data import STOPS, ROUTES
 
 StopTypes = Literal["Bus", "Subway", "Rail"]
 

@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 from PIL.ImageFont import FreeTypeFont
 from PIL.Image import Image as PilImage
-from weather import weather_current, weather_forecast, yawkWeather
-from mbta import transit, Prediction
+from .weather import weather_current, weather_forecast, yawkWeather
+from .mbta import transit, Prediction
 
 try:
     from _fbink import ffi, lib as fbink
@@ -82,6 +82,7 @@ class boxes:
 
 @dataclass
 class fonts:
+    xxtiny: FreeTypeFont
     xtiny: FreeTypeFont
     tiny: FreeTypeFont
     small: FreeTypeFont
@@ -102,7 +103,7 @@ class data:
     forecast: List[weather_forecast]
 
 
-class YAWK:
+class App:
     # BORDER, in pixels, so we don't draw too close to the edges
     BORDER = 10
 
@@ -209,6 +210,7 @@ class YAWK:
         #   comfort: temperatures (gets scaled according to the box)
         #   big: for the current temperature
         self.fonts = fonts(
+            xxtiny=ImageFont.truetype("fonts/Cabin-Regular.ttf", 15),
             xtiny=ImageFont.truetype("fonts/Cabin-Regular.ttf", 18),
             tiny=ImageFont.truetype("fonts/Cabin-Regular.ttf", 22),
             small=ImageFont.truetype("fonts/Fabrica.otf", 26),
@@ -530,12 +532,28 @@ class YAWK:
         departure = datetime.strptime(
             prediction["departureTime"][:-6], "%Y-%m-%dT%H:%M:%S"
         )
-        time_left = max(((departure - current_time).seconds - 30) / 60, 0)
-        icon = Image.open(prediction["icon"]).resize((32, 32))
 
-        img.paste(icon, (int(middle_x - icon.width / 2), cursor_y))
+        icon = Image.open(prediction["icon"]).resize((32, 32))
+        image_xy = (int(middle_x - icon.width / 2), cursor_y)
+        img.paste(icon, image_xy)
+        print("Prediction: ", prediction)
+        if prediction["type"] == "Bus":
+            bus_font, offset = (
+                (self.fonts.xtiny, 4)
+                if len(prediction["route"]) <= 2
+                else (self.fonts.xxtiny, 6)
+            )
+            self._draw_centered_text(
+                draw,
+                (middle_x, cursor_y + offset),
+                text=prediction["route"],
+                font=bus_font,
+                fill=white,
+            )
+            pass
         cursor_y += icon.height + spacer
 
+        time_left = max(((departure - current_time).seconds - 30) / 60, 0)
         self._draw_centered_text(
             draw,
             (middle_x, cursor_y),
@@ -573,42 +591,3 @@ class YAWK:
                 fbink.fbink_cls(self.fbfd, self.fbink_cfg, rect)
 
         fbink.fbink_print_image(self.fbfd, image, 0, 0, self.fbink_cfg)
-
-
-def main():
-    print("YAWK started!")
-
-    if "linux" in platform:
-        call(["hostname", "kobo"])
-
-    wait_for_wifi()
-
-    if "linux" in platform:
-        call(["killall", "-TERM", "nickel", "hindenburg", "sickel", "fickel"])
-
-    yawk = YAWK()
-    counter = 0
-
-    try:
-        while True:
-            print(
-                "*** Updating at "
-                + datetime.now().strftime("%d.%m.%y, %Hh%M")
-                + " (update nr. "
-                + str(counter)
-                + ") ***"
-            )
-            yawk.ip_address = wait_for_wifi()
-            yawk.update()
-            print("Sleeping")
-            # sleep 5 min, but ping every 30 seconds... maybe the wifi will stay on
-            for sleep in range(10):
-                time.sleep(30)
-                os.system("ping -c 1 -q www.google.com > /dev/null")
-            counter += 1
-    finally:
-        fbink.fbink_close(yawk.fbfd)
-
-
-if __name__ == "__main__":
-    main()
