@@ -12,6 +12,7 @@ from sys import platform
 import os
 from xml.etree.ElementInclude import include
 from zoneinfo import ZoneInfo
+import math
 
 from PIL import Image, ImageDraw, ImageFont
 from PIL.ImageFont import FreeTypeFont
@@ -450,7 +451,7 @@ class App:
         cursor_x = box_left + spacer
 
         title_height = 32
-        footer_height = 64
+        destinations_height = 48
 
         # Title Row
         subway_icon = Image.open(data["icon"]).resize((32, 32))
@@ -466,12 +467,16 @@ class App:
         )
         cursor_x = box_left
         cursor_y += title_height + spacer
+        predictions_cursor_y = cursor_y + destinations_height
 
         # Prediction Box
         prediction_width = (self.WIDTH - 2 * self.BORDER) / 6  # 6 predictions per row
-        prediction_height = box.height - 2 * spacer - title_height - footer_height
+        prediction_height = box.height - 2 * spacer - title_height - destinations_height
         prediction_box = box_descriptor(
-            cursor_x, cursor_y, prediction_width, prediction_height
+            cursor_x,
+            predictions_cursor_y,
+            prediction_width,
+            prediction_height,
         )
         current_time = datetime.now()
 
@@ -496,26 +501,52 @@ class App:
                     draw=draw,
                     xy=(
                         center_of_prediction_set,
-                        cursor_y + prediction_box.height + spacer,
+                        cursor_y,
                     ),
-                    text=destination.split(" ")[0],
+                    # text=destination.split(" ")[0],
+                    text=" ".join(destination.split(" ")[:2]),  # Keep 2 words
                     font=self.fonts.xtiny,
                     fill=black,
+                    lines=2,
                 )
                 draw.line(
                     [
                         (cursor_x, cursor_y),
-                        (cursor_x, cursor_y + prediction_box.height + footer_height),
+                        (
+                            cursor_x,
+                            cursor_y + prediction_box.height + destinations_height,
+                        ),
                     ],
                     gray,
                 )
 
     def _draw_centered_text(
-        self, draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, font, fill
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[float, float],
+        text: str,
+        font,
+        fill,
+        lines=1,
     ):
         x, y = xy
-        size_x, size_y = draw.textsize(text=text, font=font)
-        draw.text(xy=(int(x - size_x / 2), int(y)), text=text, font=font, fill=fill)
+        lines_to_draw = min(len(text.split(" ")), lines)
+        (meh, line_height) = draw.textsize(text="H", font=font)
+        y_offset = (lines - lines_to_draw) * line_height / 2
+
+        words = text.split(" ")
+        words_per_line = math.ceil(len(words) / lines)
+        for line in range(0, lines):
+            index = line * words_per_line
+            line_text = " ".join(words[index : index + words_per_line])
+            size_x, size_y = draw.textsize(text=line_text, font=font)
+            draw.text(
+                xy=(int(x - size_x / 2), int(y + y_offset)),
+                text=line_text,
+                font=font,
+                fill=fill,
+            )
+            y += size_y
 
     def _draw_single_prediction(
         self,
