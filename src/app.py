@@ -32,20 +32,6 @@ black = 0
 gray = 128
 
 
-def wait_for_wifi():
-    while True:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip_addr = s.getsockname()[0]
-            print("Connected, with the IP address: " + ip_addr)
-            return ip_addr
-        except Exception as e:
-            print("exc. ignored {}".format(e))
-            os.system("reboot")
-        time.sleep(15)
-
-
 def get_config_data(file_path):
     """turns the config file data into a dictionary"""
     parser = configparser.RawConfigParser()
@@ -270,6 +256,7 @@ class App:
         )
 
         # Draw Transit Stuff
+        print("Drawing Transit")
         transit_boxes: List[box_descriptor] = [
             self.boxes.mbta_1,
             self.boxes.mbta_2,
@@ -446,7 +433,6 @@ class App:
         spacer = 10
         box_left = box.pos_x + self.BORDER
         box_top = box.pos_y + self.BORDER
-        print("Should draw transit data here")
         cursor_y = box_top
         cursor_x = box_left + spacer
 
@@ -455,8 +441,6 @@ class App:
 
         # Title Row
         subway_icon = Image.open(data["icon"]).resize((32, 32))
-        print("MBTA Box 1 (X,Y): ", self.boxes.mbta_1.pos_x, box.pos_y)
-        print("MBTA Box 2 (X,Y): ", self.boxes.mbta_2.pos_x, box.pos_y)
         img.paste(subway_icon, (cursor_x, cursor_y))
         cursor_x += subway_icon.width + spacer
         draw.text(
@@ -567,7 +551,7 @@ class App:
         icon = Image.open(prediction["icon"]).resize((32, 32))
         image_xy = (int(middle_x - icon.width / 2), cursor_y)
         img.paste(icon, image_xy)
-        print("Prediction: ", prediction)
+
         if prediction["type"] == "Bus":
             bus_font, offset = (
                 (self.fonts.xtiny, 4)

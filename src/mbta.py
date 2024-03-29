@@ -100,10 +100,6 @@ class transit:
     def _get_predictions(self, stop: str) -> TransitStop:
         for attempt in range(5):
             try:
-                print(
-                    "URL: ",
-                    f"{MBTA_API_URL}/predictions?filter[stop]={stop}&page[limit]={FETCH_LIMIT}&include=trip&sort=departure_time",
-                )
                 res = requests.get(
                     f"{MBTA_API_URL}/predictions?filter[stop]={stop}&page[limit]={FETCH_LIMIT}&include=trip&sort=departure_time"
                 )
