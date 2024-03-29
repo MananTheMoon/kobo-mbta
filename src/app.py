@@ -19,6 +19,7 @@ from PIL.ImageFont import FreeTypeFont
 from PIL.Image import Image as PilImage
 from .weather import weather_current, weather_forecast, yawkWeather
 from .mbta import transit, Prediction
+from .draw_helpers import middle_xy
 
 try:
     from _fbink import ffi, lib as fbink
@@ -105,6 +106,7 @@ class App:
             cfg_file_data["stop_2"],
             cfg_file_data["stop_3"],
         ]
+        self.transit_data = {}
 
         # fbink configuration
         self.fbink_cfg = ffi.new("FBInkConfig *")
@@ -145,10 +147,11 @@ class App:
         try:
             print("Getting transit Data...")
             self.transit_data = transit(self.cfg_data["stops"]).get_predictions()
-            print("\nTransit Data:\n\n", self.transit_data)
+            self.error_transit = False
         except Exception as e:
-            print("ERROR: Fetching weather data failed.\n", e)
-            fbink.fbink_close(self.fbfd)
+            self.transit_data = {}
+            self.error_transit = True
+            print("ERROR: Fetching transit data failed.\n", e)
 
         # configuration for the image
         # Boxes positions
@@ -178,14 +181,6 @@ class App:
         mbta_3 = box_descriptor(
             0,
             current.height + mbta_1.height + mbta_2.height,
-            self.screen_size[0],
-            int((self.screen_size[1] - current.height) / 3),
-        )
-
-        #   tomorrow
-        tomorrow = box_descriptor(
-            0,
-            current.height,
             self.screen_size[0],
             int((self.screen_size[1] - current.height) / 3),
         )
@@ -432,7 +427,9 @@ class App:
     ):
         spacer = 10
         box_left = box.pos_x + self.BORDER
+        box_right = box.pos_x + box.width
         box_top = box.pos_y + self.BORDER
+        box_bottom = box.pos_y + box.height
         cursor_y = box_top
         cursor_x = box_left + spacer
 
@@ -452,6 +449,17 @@ class App:
         cursor_x = box_left
         cursor_y += title_height + spacer
         predictions_cursor_y = cursor_y + destinations_height
+
+        if "errorMessage" in data:
+            print("Error")
+            self._draw_centered_text(
+                draw=draw,
+                xy=middle_xy((box_left, box_top), (box_right, box_bottom)),
+                text=data["errorMessage"],
+                font=self.fonts.small,
+                fill=black,
+            )
+            return
 
         # Prediction Box
         prediction_width = (self.WIDTH - 2 * self.BORDER) / 6  # 6 predictions per row
@@ -487,7 +495,6 @@ class App:
                         center_of_prediction_set,
                         cursor_y,
                     ),
-                    # text=destination.split(" ")[0],
                     text=" ".join(destination.split(" ")[:2]),  # Keep 2 words
                     font=self.fonts.xtiny,
                     fill=black,
@@ -568,7 +575,10 @@ class App:
             pass
         cursor_y += icon.height + spacer
 
-        time_left = max(((departure - current_time).seconds - 30) / 60, 0)
+        time_left = max(((departure - current_time).total_seconds() - 30) / 60, 0)
+        # print(
+        #     f"Departure[{departure}] - Current[{current_time}] = {departure - current_time}"
+        # )
         self._draw_centered_text(
             draw,
             (middle_x, cursor_y),
@@ -577,14 +587,27 @@ class App:
             fill=black,
         )
 
-    def update(self):
-        try:
-            self.weather.current = self.weather_fetcher.get_weather_current()
-            self.weather.forecast = self.weather_fetcher.get_weather_forecast()
-        except Exception as e:
-            # Something went wrong while getting API Data, try again later.
-            print("Failed to get weather data:\r\n" + str(e))
-            return
+    def update(self, refetch_weather=True, refetch_transit=True):
+        if refetch_weather:
+            print("Refetching Weather")
+            try:
+                self.weather.current = self.weather_fetcher.get_weather_current()
+                self.weather.forecast = self.weather_fetcher.get_weather_forecast()
+                self.error_weather = False
+            except Exception as e:
+                # Something went wrong while getting API Data, try again later.
+                print("Failed to get weather data:\r\n" + str(e))
+                self.error_weather = True
+
+        if refetch_transit:
+            print("Refetching Transit")
+            try:
+                self.transit_data = transit(self.cfg_data["stops"]).get_predictions()
+                self.error_transit = False
+            except Exception as e:
+                print("Failed to get transit data:\r\n" + str(e))
+                self.error_transit = True
+
         image = self._create_image()
         print("Drawing image")
         rect = ffi.new("FBInkRect *")

@@ -4,8 +4,9 @@ from requests.exceptions import RequestException
 import time
 from typing import List, Literal, Dict, TypedDict
 from .mbta_static_data import STOPS, ROUTES
+from .utils import to_datetime
 
-StopTypes = Literal["Bus", "Subway", "Rail"]
+StopTypes = Literal["Bus", "Subway", "Rail", "Error"]
 
 
 class StopData(TypedDict):
@@ -30,6 +31,7 @@ class TransitStop(TypedDict):
     predictions: Predictions
     type: StopTypes
     name: str
+    errorMessage: str
     icon: str
 
 
@@ -48,10 +50,8 @@ class transit:
             if res.status_code != 200:
                 raise ValueError("MBTA Request Unsuccessful: \r\n{}".format(res.json()))
             data = res.json()["data"]
-            if len(data) != len(self.stops):
-                raise ValueError(
-                    "One or more stops could not be found: \r\n{}".format(data)
-                )
+            if len(data) == 0:
+                raise ValueError("Could not find any stops")
         except RequestException as e:
             raise ValueError("MBTA Request Failed, check stops:\r\n{}".format(e))
 
@@ -98,30 +98,46 @@ class transit:
         return ROUTES["default"]["type"]
 
     def _get_predictions(self, stop: str) -> TransitStop:
-        for attempt in range(5):
+        stop_data = self._get_stop_data(stop)
+        for attempt in range(3):
             try:
                 res = requests.get(
                     f"{MBTA_API_URL}/predictions?filter[stop]={stop}&page[limit]={FETCH_LIMIT}&include=trip&sort=departure_time"
                 )
                 data = res.json()["data"]
+                if not data:
+                    raise RequestException()
                 return self._transform_mbta_predictions(
                     data,
                     self._transform_trips(res.json()["included"]),
-                    self._get_stop_data(stop),
+                    stop_data,
                 )
             except RequestException as e:
-                print("MBTA Prediction Request for {stop} failed. \r\n{}".format(e))
+                print("MBTA Prediction Request for {} failed. \r\n{}".format(stop, e))
                 time.sleep(2**attempt)
                 continue
-        return {}
+        return {
+            "name": stop_data["name"],
+            "errorMessage": "Failed to retreive data.",
+            "icon": "icons-transit/error.png",
+            "predictions": {},
+        }
+
+    def _filter_predictions_api(self, data: List):
+        now = datetime.now()
+        filtered_data = [
+            obj
+            for obj in data
+            if obj["attributes"]["departure_time"] != None
+            and to_datetime(obj["attributes"]["departure_time"]) > now
+        ][0:DISPLAY_LIMIT]
+        return filtered_data
 
     def _transform_mbta_predictions(
         self, data: List, trips: Trips, stop_data: StopData
     ) -> Predictions:
         predictions: Predictions = {value: [] for key, value in trips.items()}
-        filtered_data = [
-            obj for obj in data if obj["attributes"]["departure_time"] != None
-        ][0:DISPLAY_LIMIT]
+        filtered_data = self._filter_predictions_api(data)
         for obj in filtered_data:
             trip_headsign = trips[obj["relationships"]["trip"]["data"]["id"]]
             route = obj["relationships"]["route"]["data"]["id"]
@@ -129,6 +145,9 @@ class transit:
                 {
                     "arrivalTime": obj["attributes"]["arrival_time"],
                     "departureTime": obj["attributes"]["departure_time"],
+                    "departureTimeStripped": to_datetime(
+                        obj["attributes"]["departure_time"]
+                    ),
                     "direction": obj["attributes"]["direction_id"],
                     "route": route,
                     "icon": self._get_route_icon(route),
