@@ -1,0 +1,1 @@
+ps aux | grep '[p]ython main.py' | awk '{print $1}'

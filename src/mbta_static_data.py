@@ -4,6 +4,7 @@ STOPS = {
     "place-davis": {"type": "Subway", "name": "Davis Square", "line": "Red"},
     "2736": {"type": "Bus", "name": "Broadway @ Boston"},
     "2737": {"type": "Bus", "name": "Broadway @ Pearson"},
+    "2697": {"type": "Bus", "name": "Broadway @ Josephine"},
 }
 
 ROUTES = {

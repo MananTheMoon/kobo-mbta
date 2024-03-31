@@ -144,7 +144,7 @@ class yawkWeather:
             "APPID": self.cfg["api"],
         }
 
-        for attempt in range(5):
+        for attempt in range(2):
             try:
                 weather_data = requests.get(
                     "http://api.openweathermap.org/data/2.5/weather", params=params

@@ -142,6 +142,8 @@ class App:
             print("Successfully fetched weather data.")
         except Exception as e:
             print("ERROR: Fetching weather data failed.\n", e)
+            self.weather.current = {}
+            self.weather.forecast = {}
             fbink.fbink_close(self.fbfd)
 
         try:
@@ -157,7 +159,7 @@ class App:
         # Boxes positions
         #   current condition
         current = box_descriptor(
-            0, 0, int(2 * self.screen_size[0] / 3), int(self.screen_size[1] / 3)
+            0, 0, int(2 * self.screen_size[0] / 3), int(self.screen_size[1] / 3 - 40)
         )
         #   today's forecast
         today = box_descriptor(
@@ -196,7 +198,7 @@ class App:
             xtiny=ImageFont.truetype("fonts/Cabin-Regular.ttf", 18),
             tiny=ImageFont.truetype("fonts/Cabin-Regular.ttf", 22),
             small=ImageFont.truetype("fonts/Fabrica.otf", 26),
-            comfort=ImageFont.truetype("fonts/Comfortaa-Regular.ttf", 60),
+            comfort=ImageFont.truetype("fonts/Comfortaa-Regular.ttf", 48),
             big=ImageFont.truetype(
                 "fonts/Comfortaa-Regular.ttf", int(self.screen_size[1] / 10)
             ),
@@ -208,6 +210,36 @@ class App:
             humidity=Image.open("icons/h.png"),
             temperature=Image.open("icons/deg_f.png"),
         )
+
+    def _draw_weather(self, img: Image.Image, draw: ImageDraw.ImageDraw) -> str:
+        if hasattr(self.weather.current, "city"):
+            (date_str, time_str) = (
+                datetime.now()
+                .astimezone(ZoneInfo("America/New_York"))
+                .strftime("%Y-%m-%d %H:%M")
+                .split(" ")
+            )
+            # header = (
+
+            #     self.weather.current.city.split(",")[0]
+            #     + "     "
+            #     + datetime.now()
+            #     .astimezone(ZoneInfo("America/New_York"))
+            #     .strftime("%Y-%m-%d   %H:%M")
+            # )
+            header = (
+                time_str
+                + "    "
+                + self.weather.current.city.split(",")[0]
+                + "    "
+                + date_str
+            )
+            draw.text(
+                (self.BORDER, self.BORDER),
+                text=header,
+                font=self.fonts.small,
+                fill=black,
+            )
 
     def _create_image(self) -> str:
         print("Creating image . . .")
@@ -260,23 +292,9 @@ class App:
         for i, (key, value) in enumerate(self.transit_data.items()):
             self._draw_transit_data(img, draw, transit_boxes[i], value)
 
-        # Current conditions
-        # City Name, Country Code, Day, Time
-        header = (
-            self.weather.current.city.split(",")[0]
-            + ", "
-            + datetime.now()
-            .astimezone(ZoneInfo("America/New_York"))
-            .strftime("%Y-%m-%d %H:%M")
-        )
-        header_w, header_h = draw.textsize(header, font=self.fonts.small)
-        draw.text(
-            (self.boxes.current.width / 2 - header_w / 2, self.BORDER),
-            header,
-            font=self.fonts.small,
-            fill=black,
-        )
-        # temperature
+        self._draw_weather(img, draw)
+
+        print(self.weather.current)
 
         temp_w, temp_h = draw.textsize(
             str(round(self.weather.current.temperature)), font=self.fonts.big
@@ -308,9 +326,11 @@ class App:
         )
         x = (self.boxes.current.width + temp_end_x) / 2 - condition_w / 2
         y = self.boxes.current.height / 2 + int(condition.size[1] / 2) + 3 * self.BORDER
+        """
         draw.text(
             (x, y), self.weather.current.condition, font=self.fonts.small, fill=gray
         )
+        
         # wind icon
         y = self.boxes.current.height - self.icons.wind.size[1]
         img.paste(self.icons.wind, (self.BORDER, y))
@@ -326,6 +346,7 @@ class App:
             font=self.fonts.small,
             fill=black,
         )
+        """
         # humidity icon
         y = (
             self.boxes.current.height
@@ -335,19 +356,29 @@ class App:
         x = int(
             self.BORDER + self.icons.wind.size[0] / 2 - self.icons.humidity.size[0] / 2
         )
+        print("humidity - ", x, y)
+        # Manan Hack - TODO
+        x, y = 18, 145
         img.paste(self.icons.humidity, (x, y))
-        # humidity value
-        humidity_w, humidity_h = draw.textsize(
-            str(int(round(self.weather.current.humidity, 0))) + "%",
-            font=self.fonts.small,
-        )
-        y = y + self.icons.humidity.size[1] / 2 - humidity_h / 2
         draw.text(
-            (self.BORDER + self.icons.wind.size[0] + self.BORDER, y),
+            (x + 55, y + 18),
             str(int(round(self.weather.current.humidity, 0))) + "%",
             font=self.fonts.small,
             fill=black,
         )
+
+        # humidity value
+        # humidity_w, humidity_h = draw.textsize(
+        #     str(int(round(self.weather.current.humidity, 0))) + "%",
+        #     font=self.fonts.small,
+        # )
+        # y = y + self.icons.humidity.size[1] / 2 - humidity_h / 2
+        # draw.text(
+        #     (self.BORDER + self.icons.wind.size[0] + self.BORDER, y),
+        #     str(int(round(self.weather.current.humidity, 0))) + "%",
+        #     font=self.fonts.small,
+        #     fill=black,
+        # )
 
         def print_temp(pos: int, text: str, temp: float, scale: float = 1.0):
             # text string
@@ -390,6 +421,9 @@ class App:
         x = int(
             self.boxes.today.pos_x + self.boxes.today.width / 2 - condition.size[0] / 2
         )
+        # Manan Hack (TODO FIX)
+        (x, y) = (450, 122)
+        print("condition size", x, y)
         img.paste(condition, (x, y))
 
         # ip address
@@ -597,6 +631,8 @@ class App:
             except Exception as e:
                 # Something went wrong while getting API Data, try again later.
                 print("Failed to get weather data:\r\n" + str(e))
+                self.weather.current = {}
+                self.weather.forecast = {}
                 self.error_weather = True
 
         if refetch_transit:
